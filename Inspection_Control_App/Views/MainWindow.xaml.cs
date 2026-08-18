@@ -24,36 +24,57 @@ namespace Inspection_Control_App.Views
         private List<CheckStatusModel> checkStatusList;
         private MyUserControl usControl;
         string device = Environment.MachineName;
+        private DateTime date_All_PO;
         public MainWindow()
         {
-            InitializeComponent();
             _mySQL = new MySQL();
+            InitializeComponent();
+            
             LPoModel = new List<POModel>();
             checkStatusList = new List<CheckStatusModel>();
             usControl = new MyUserControl();
+            date_All_PO = DateTime.Now.AddDays(-6);
             
+        }
+        private async Task LoadAllPO()
+        {
+            var ListPOAL = await _mySQL.GetAllPOList(device, date_All_PO);
+            LPoModel.Clear();
+            LPoModel = ListPOAL;
+            dgListPO.ItemsSource = LPoModel;
+        }
+        private async void Window_Loaded(object sender, RoutedEventArgs e)
+        {
+            await loadData();
+            _mySQL = new MySQL();
         }
 
         private async Task loadData()
         {
             //var temp = _mySQL.GetPOModel("520006615033");
             //_ = _mySQL.InsertPOWIP("520006649062","123123");
+            int sluongPOALL = 0;
             while (true)
             {
-                LPoModel.Clear();
-                LPoModel = await _mySQL.GetAllPOList(device);
-                dgListPO.ItemsSource = LPoModel;
+                var ListPOAL = await _mySQL.GetAllPOList(device,date_All_PO);
+                if (sluongPOALL != ListPOAL.Count)
+                {
+                    await LoadAllPO();
+                }
+                sluongPOALL = ListPOAL.Count;
+
+                //load usrcontrol 
+                usControl = await _mySQL.GetPOModel_CHECK(device);
+                if (usControl != null)
+                {
+                    txtInspectionPos.Text = usControl.Ins_Key;
+                    txtPoStayCheck.Text = usControl.PO_Check;
+                }
 
                 //load list check 
                 checkStatusList.Clear();
-                checkStatusList = await _mySQL.GetPOByPSTX(txtPoStayCheck.Text);
+                checkStatusList = await _mySQL.GetPOByPSTX(txtPoStayCheck.Text,date_All_PO);
                 dgCheckStatus.ItemsSource = checkStatusList;
-
-                //load usrcontrol 
-                
-                usControl = await _mySQL.GetPOModel_CHECK(device);
-                txtInspectionPos.Text = usControl.Ins_Key;
-                txtPoStayCheck.Text = usControl.PO_Check;
 
                 await Task.Delay(20000);
             }
@@ -71,34 +92,46 @@ namespace Inspection_Control_App.Views
                     bool check = await _mySQL.InsertPOWIP(inputWIP, machine,device);
                     if (!check) { MessageBox.Show("Đã có lỗi trong quá trình thực hiện"); }
                     txtInputWIP.Clear();
+
+                    await LoadAllPO();
                     await loadData();
                 }
             }
         }
-
-        private void txtInputWIP_TextChanged(object sender, TextChangedEventArgs e)
-        {
-
-        }
-
-        private async void Window_Loaded(object sender, RoutedEventArgs e)
+        private async void Button_Click(object sender, RoutedEventArgs e)
         {
             await loadData();
         }
 
-        private void txtPoStayCheck_TextChanged(object sender, TextChangedEventArgs e)
+        private void btn_manage_Click(object sender, RoutedEventArgs e)
         {
-            
+            var manageScreen = new ManageScreen();
+            manageScreen.Owner = this;
+            manageScreen.ShowDialog();
         }
 
-        private async Task GetCenter(string inspec)
+        private async void cboFilterDate_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            while (true)
+            if (cboFilterDate.SelectedItem is ComboBoxItem selectedItem)
             {
+                string filterType = selectedItem.Content.ToString();
 
+                switch (filterType)
+                {
+                    case "Hôm nay":
+                        date_All_PO = DateTime.Now.AddDays(-1);
+                        await LoadAllPO();
+                        break;
+                    case "7 ngày trở lại":
+                        date_All_PO = DateTime.Now.AddDays(-6);
+                        await LoadAllPO();
+                        break;
+                    case "30 ngày trở lại":
+                        date_All_PO = DateTime.Now.AddDays(-29);
+                        await LoadAllPO();
+                        break;
+                }
             }
         }
-
-
     }
 }
