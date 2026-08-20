@@ -146,7 +146,7 @@
                             <!-- Field 3: WiP Filter -->
                             <StackPanel Margin="10,0,0,0">
                                 <TextBlock Text="WIP" Foreground="#AAAAAA" FontSize="12" Margin="0,0,0,4"/>
-                                <TextBox x:Name="txtInputWIP" ToolTip="Nhập mã PO cần kiểm tra..." />
+                                <TextBox x:Name="txtInputWIP" KeyDown="txtInputWIP_KeyDown" ToolTip="Nhập mã PO cần kiểm tra..." />
                             </StackPanel>
                             <!-- Field 3: Thời gian Filter -->
                             <StackPanel Margin="10,20,0,10">
