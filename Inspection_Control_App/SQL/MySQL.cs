@@ -7,14 +7,14 @@ namespace Inspection_Control_App.SQL
 {
     public class MySQL
     {
-        private static string connectionString { get; } = "Data Source=192.168.122.2;Initial Catalog=F2Database;User ID=admin;Password=Buitanphat0201@";
+        private static string connectionString { get; } = "Data Source=192.168.122.2;Initial Catalog=KVH;User ID=kvh_write;Password=kvh_wr0te@";
         //dl nhan vien
         private static string connection_Employee { get; } = @"Data Source=192.168.0.11;Initial Catalog=SGPrecision;User ID=hrmsadmin;Password=adminhrms;Max Pool Size=50;Application Name=Molybden_DL;";
         private static string query_id_get_name { get; } = "select [Position(E)] from DataSPC where [Code] = @idNV";
 
         //private static string query_insertPO { get; } = "Insert MANUFA_F2_PO_WIP(PO_Number,NumInspec,nameMachine) values (@PO_Add,@Num,@machine)";
-        private static string query_insertPO { get; } = "IF NOT EXISTS (\r\n    SELECT 1 \r\n    FROM [F2Database].[dbo].[F2_PO_WIP] \r\n    WHERE PO_Number = @PO_Add AND nameMachine = @machine\r\n)\r\nBEGIN\r\n    INSERT INTO [F2Database].[dbo].[F2_PO_WIP] (PO_Number, NumInspec, Saved_At, nameMachine)\r\n    VALUES (@PO_Add, @Num, GETDATE(), @machine);\r\nEND";
-        private static string query_data_table_WIP { get; } = "SELECT \r\n    hed.AUFNR AS POREQNO,\r\n    hed.PHTX AS ITEMCD,\r\n    hed.PHCD AS PITEMID,\r\n    hed.KDAUF,\r\n    hed.GAMNG,\r\n    prd.FERTH,\r\n    dtl.EDATU AS EXPORTD,\r\n    dtl.KWMENG AS TTL_LOT,\r\n    dtl.RRONYU1 as SHIPTO,\r\n    f.TRANSPORT as SHIPBY,\r\n    hed.PSTX,\r\n\r\n    -- 1. LẤY THÊM CỘT THỜI GIAN VÀO ĐÂY\r\n    POWIP.Saved_At AS SAVED_TIME,\r\n\r\n    CASE \r\n        WHEN dtl.RRONYU1 IN ('KJS', 'KJK', 'KJS_TK', 'ERC', 'WRC', 'CRC', 'FJS')\r\n             AND SUBSTRING(dtl.ZGLOBAL_CODE, 7, 1) = '-'\r\n        THEN SUBSTRING(dtl.ZGLOBAL_CODE, 8, LEN(dtl.ZGLOBAL_CODE))\r\n        ELSE dtl.ZGLOBAL_CODE\r\n    END AS CUSTNO,\r\n\r\n    CASE \r\n        WHEN f.product_code <> '' THEN f.product_code\r\n        WHEN LEFT(dtl.RONAME, 6) = '[SBS]_' THEN SUBSTRING(dtl.RONAME, 7, LEN(dtl.RONAME))\r\n        WHEN LEFT(dtl.RONAME, 5) = '[HF]_' THEN SUBSTRING(dtl.RONAME, 6, LEN(dtl.RONAME))\r\n        WHEN LEFT(hed.PHTX, 6) = '[SBS]_' THEN SUBSTRING(hed.PHTX, 7, LEN(hed.PHTX))\r\n        WHEN LEFT(hed.PHTX, 5) = '[HF]_' THEN SUBSTRING(hed.PHTX, 6, LEN(hed.PHTX))\r\n        ELSE ISNULL(dtl.RONAME, hed.PHTX)\r\n    END AS RONAME\r\n\r\nFROM MANUFA_F_PD_DT_REQ_HED hed\r\n\r\nLEFT JOIN MANUFA_F_PD_GRB_PRODUCT prd \r\n    ON hed.PHCD = prd.MATNR\r\n\r\nLEFT JOIN MANUFA_F_PD_DT_ORDER_DTL dtl \r\n    ON dtl.VBELN = hed.KDAUF\r\n\r\n-- 2. SỬA ĐIỀU KIỆN JOIN THÀNH GHÉP THEO MÃ PO (HOẶC KDAUF/AUFNR)\r\nLEFT JOIN [F2Database].[dbo].[F2_PO_WIP] POWIP\r\n    ON hed.AUFNR = POWIP.PO_Number   -- Hoặc dtl.VBELN / hed.KDAUF tùy thuộc cột nào lưu Mã PO trong POWIP\r\n\r\nOUTER APPLY\r\n(\r\n    SELECT TOP 1\r\n        w.product_code, TRANSPORT\r\n    FROM MANUFA_F_PD_W_ORDER w\r\n    WHERE w.mpo = dtl.ZGLOBAL_CODE\r\n    ORDER BY w.ID DESC\r\n) f\r\n\r\nWHERE hed.AUFNR = @PO_num\r\n  AND (hed.LOEKZ <> 'X' OR hed.LOEKZ IS NULL)\r\n  AND (dtl.ABGRU IS NULL OR dtl.ABGRU NOT LIKE 'Z1');";
+        private static string query_insertPO { get; } = "IF NOT EXISTS (\r\n    SELECT 1 \r\n    FROM [KVH].[dbo].[POWip] \r\n    WHERE PO_Number = @PO_Add AND nameMachine = @machine\r\n)\r\nBEGIN\r\n    INSERT INTO [KVH].[dbo].[POWip] (PO_Number, NumInspec, Saved_At, nameMachine)\r\n    VALUES (@PO_Add, @Num, GETDATE(), @machine);\r\nEND";
+        private static string query_data_table_WIP { get; } = "SELECT \r\n    hed.AUFNR AS POREQNO,\r\n    hed.PHTX AS ITEMCD,\r\n    hed.PHCD AS PITEMID,\r\n    hed.KDAUF,\r\n    hed.GAMNG,\r\n    prd.FERTH,\r\n    dtl.EDATU AS EXPORTD,\r\n    dtl.KWMENG AS TTL_LOT,\r\n    dtl.RRONYU1 as SHIPTO,\r\n    f.TRANSPORT as SHIPBY,\r\n    hed.PSTX,\r\n\r\n    -- 1. LẤY THÊM CỘT THỜI GIAN VÀO ĐÂY\r\n    POWIP.Saved_At AS SAVED_TIME,\r\n\r\n    CASE \r\n        WHEN dtl.RRONYU1 IN ('KJS', 'KJK', 'KJS_TK', 'ERC', 'WRC', 'CRC', 'FJS')\r\n             AND SUBSTRING(dtl.ZGLOBAL_CODE, 7, 1) = '-'\r\n        THEN SUBSTRING(dtl.ZGLOBAL_CODE, 8, LEN(dtl.ZGLOBAL_CODE))\r\n        ELSE dtl.ZGLOBAL_CODE\r\n    END AS CUSTNO,\r\n\r\n    CASE \r\n        WHEN f.product_code <> '' THEN f.product_code\r\n        WHEN LEFT(dtl.RONAME, 6) = '[SBS]_' THEN SUBSTRING(dtl.RONAME, 7, LEN(dtl.RONAME))\r\n        WHEN LEFT(dtl.RONAME, 5) = '[HF]_' THEN SUBSTRING(dtl.RONAME, 6, LEN(dtl.RONAME))\r\n        WHEN LEFT(hed.PHTX, 6) = '[SBS]_' THEN SUBSTRING(hed.PHTX, 7, LEN(hed.PHTX))\r\n        WHEN LEFT(hed.PHTX, 5) = '[HF]_' THEN SUBSTRING(hed.PHTX, 6, LEN(hed.PHTX))\r\n        ELSE ISNULL(dtl.RONAME, hed.PHTX)\r\n    END AS RONAME\r\n\r\nFROM MANUFA_F_PD_DT_REQ_HED hed\r\n\r\nLEFT JOIN MANUFA_F_PD_GRB_PRODUCT prd \r\n    ON hed.PHCD = prd.MATNR\r\n\r\nLEFT JOIN MANUFA_F_PD_DT_ORDER_DTL dtl \r\n    ON dtl.VBELN = hed.KDAUF\r\n\r\n-- 2. SỬA ĐIỀU KIỆN JOIN THÀNH GHÉP THEO MÃ PO (HOẶC KDAUF/AUFNR)\r\nLEFT JOIN [KVH].[dbo].[POWip] POWIP\r\n    ON hed.AUFNR = POWIP.PO_Number   -- Hoặc dtl.VBELN / hed.KDAUF tùy thuộc cột nào lưu Mã PO trong POWIP\r\n\r\nOUTER APPLY\r\n(\r\n    SELECT TOP 1\r\n        w.product_code, TRANSPORT\r\n    FROM MANUFA_F_PD_W_ORDER w\r\n    WHERE w.mpo = dtl.ZGLOBAL_CODE\r\n    ORDER BY w.ID DESC\r\n) f\r\n\r\nWHERE hed.AUFNR = @PO_num\r\n  AND (hed.LOEKZ <> 'X' OR hed.LOEKZ IS NULL)\r\n  AND (dtl.ABGRU IS NULL OR dtl.ABGRU NOT LIKE 'Z1');";
         //private static string query_Get_ALL_table_WIP { get; } = "SELECT \r\n    hed.AUFNR AS POREQNO,\r\n    hed.PHTX AS ITEMCD,\r\n    hed.PHCD AS PITEMID,\r\n    hed.KDAUF,\r\n    hed.GAMNG,\r\n    prd.FERTH,\r\n    dtl.EDATU AS EXPORTD,\r\n    dtl.KWMENG AS TTL_LOT,\r\n    dtl.RRONYU1 AS SHIPTO,\r\n    f.TRANSPORT AS SHIPBY,\r\n    hed.PSTX,\r\n\r\n    POWIP.Saved_At AS SAVED_TIME,\r\n\r\n    CASE \r\n        WHEN dtl.RRONYU1 IN ('KJS', 'KJK', 'KJS_TK', 'ERC', 'WRC', 'CRC', 'FJS')\r\n             AND SUBSTRING(dtl.ZGLOBAL_CODE, 7, 1) = '-'\r\n        THEN SUBSTRING(dtl.ZGLOBAL_CODE, 8, LEN(dtl.ZGLOBAL_CODE))\r\n        ELSE dtl.ZGLOBAL_CODE\r\n    END AS CUSTNO,\r\n\r\n    CASE \r\n        WHEN f.product_code <> '' THEN f.product_code\r\n        WHEN LEFT(dtl.RONAME, 6) = '[SBS]_' THEN SUBSTRING(dtl.RONAME, 7, LEN(dtl.RONAME))\r\n        WHEN LEFT(dtl.RONAME, 5) = '[HF]_' THEN SUBSTRING(dtl.RONAME, 6, LEN(dtl.RONAME))\r\n        WHEN LEFT(hed.PHTX, 6) = '[SBS]_' THEN SUBSTRING(hed.PHTX, 7, LEN(hed.PHTX))\r\n        WHEN LEFT(hed.PHTX, 5) = '[HF]_' THEN SUBSTRING(hed.PHTX, 6, LEN(hed.PHTX))\r\n        ELSE ISNULL(dtl.RONAME, hed.PHTX)\r\n    END AS RONAME\r\n\r\nFROM MANUFA_F_PD_DT_REQ_HED hed\r\n\r\nLEFT JOIN MANUFA_F_PD_GRB_PRODUCT prd \r\n    ON hed.PHCD = prd.MATNR\r\n\r\nLEFT JOIN MANUFA_F_PD_DT_ORDER_DTL dtl \r\n    ON dtl.VBELN = hed.KDAUF\r\n\r\n-- CHUYỂN THÀNH INNER JOIN\r\nINNER JOIN MANUFA_F2_PO_WIP POWIP\r\n    ON hed.AUFNR = POWIP.PO_Number\r\n\r\nOUTER APPLY\r\n(\r\n    SELECT TOP 1\r\n        w.product_code, TRANSPORT\r\n    FROM MANUFA_F_PD_W_ORDER w\r\n    WHERE w.mpo = dtl.ZGLOBAL_CODE\r\n    ORDER BY w.ID DESC\r\n) f\r\n\r\nWHERE (hed.LOEKZ <> 'X' OR hed.LOEKZ IS NULL)\r\n  AND (dtl.ABGRU IS NULL OR dtl.ABGRU NOT LIKE 'Z1');";
         private static string query_Get_ALL_table_WIP { get; } = @"
 SELECT 
@@ -57,7 +57,7 @@ SELECT
             ON dtl.VBELN = hed.KDAUF
 
         -- CHUYỂN THÀNH INNER JOIN
-        INNER JOIN [F2Database].[dbo].[F2_PO_WIP] POWIP
+        INNER JOIN [KVH].[dbo].[POWip] POWIP
             ON hed.AUFNR = POWIP.PO_Number
 
         OUTER APPLY
@@ -79,9 +79,9 @@ SELECT
         ORDER BY POWIP.Saved_At DESC;";
         //lay thheo type va tim so ban 
         private static string qury_get_PO_type { get; } = "" +
-    "SELECT DISTINCT\r\npw.PO_Number,\r\npw.NumInspec,\r\nhed.PSTX,\r\nhed.PHTX,\r\npw.Saved_At,\r\nLC.index_terminal\r\nFROM [F2Database].[dbo].[F2_PO_WIP] pw\r\nINNER JOIN [MANUFASPCPD].[dbo].[MANUFA_F_PD_DT_REQ_HED] hed \r\nON pw.PO_Number = hed.AUFNR\r\nINNER JOIN [F2Database].[dbo].[F2_Inspection_H_location] LC \r\nON pw.nameMachine = LC.Machine\r\nWHERE hed.PHTX = (\r\nSELECT TOP 1 PHTX \r\nFROM [MANUFASPCPD].[dbo].[MANUFA_F_PD_DT_REQ_HED]\r\nWHERE AUFNR = @PO_search\r\n)\r\nAND pw.Saved_At >= @date\r\nAND (hed.LOEKZ <> 'X' OR hed.LOEKZ IS NULL);";
-        private static string query_check_PO { get; } = "select [PO_Check] FROM [F2Database].[dbo].[F2_Users_Tablet]";
-        private static string query_Get_ins { get; } = "select top(1) * from [F2Database].[dbo].[F2_Users_Tablet] where nameMachine = @machine order by dateCreated desc ";
+    "SELECT DISTINCT\r\npw.PO_Number,\r\npw.NumInspec,\r\nhed.PSTX,\r\nhed.PHTX,\r\npw.Saved_At,\r\nLC.index_terminal\r\nFROM [KVH].[dbo].[POWip] pw\r\nINNER JOIN [MANUFASPCPD].[dbo].[MANUFA_F_PD_DT_REQ_HED] hed \r\nON pw.PO_Number = hed.AUFNR\r\nINNER JOIN [F2Database].[dbo].[F2_Inspection_H_location] LC \r\nON pw.nameMachine = LC.Machine\r\nWHERE hed.PHTX = (\r\nSELECT TOP 1 PHTX \r\nFROM [MANUFASPCPD].[dbo].[MANUFA_F_PD_DT_REQ_HED]\r\nWHERE AUFNR = @PO_search\r\n)\r\nAND pw.Saved_At >= @date\r\nAND (hed.LOEKZ <> 'X' OR hed.LOEKZ IS NULL);";
+        private static string query_check_PO { get; } = "select [PO_Check] FROM [KVH].[dbo].[UsersTablet]";
+        private static string query_Get_ins { get; } = "select top(1) * from [KVH].[dbo].[UsersTablet] where nameMachine = @machine order by dateCreated desc ";
 
 
         public async Task<bool> InsertPOWIP(string po, string ins, string machine)
@@ -112,18 +112,18 @@ SELECT
 
         }
 
-        public POModel GetPOModel(string po)
+        public async Task<POModel> GetPOModel(string po)
         {
             using (SqlConnection connect = new SqlConnection(connectionString))
             {
                 try
                 {
-                    connect.Open();
+                    await connect.OpenAsync();
                     SqlCommand cmd = new SqlCommand(query_data_table_WIP, connect);
                     cmd.Parameters.AddWithValue("PO_num", po.ToString().Trim());
-                    using (SqlDataReader reader = cmd.ExecuteReader())
+                    using (SqlDataReader reader = await cmd.ExecuteReaderAsync())
                     {
-                        if (reader.Read())
+                        if (await reader.ReadAsync())
                         {
                             float.TryParse(reader["GAMNG"].ToString(), out float sluong);
                             DateTime.TryParse(reader["SAVED_TIME"].ToString(), out DateTime date);
