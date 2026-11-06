@@ -45,6 +45,7 @@ namespace Inspection_Control_App.Views
         }
         private async void Window_Loaded(object sender, RoutedEventArgs e)
         {
+            await machineMap.LoadLayoutAsync(_mySQL);
             await loadData();
             _mySQL = new MySQL();
         }
@@ -75,6 +76,7 @@ namespace Inspection_Control_App.Views
                 checkStatusList.Clear();
                 checkStatusList = await _mySQL.GetPOByPSTX(txtPoStayCheck.Text,date_All_PO);
                 dgCheckStatus.ItemsSource = checkStatusList;
+                machineMap.Highlight(checkStatusList, device);
 
                 await Task.Delay(20000);
             }

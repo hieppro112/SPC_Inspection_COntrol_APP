@@ -79,9 +79,99 @@ SELECT
         ORDER BY POWIP.Saved_At DESC;";
         //lay thheo type va tim so ban 
         private static string qury_get_PO_type { get; } = "" +
-    "SELECT DISTINCT\r\npw.PO_Number,\r\npw.NumInspec,\r\nhed.PSTX,\r\nhed.PHTX,\r\npw.Saved_At,\r\nLC.index_terminal\r\nFROM [KVH].[dbo].[POWip] pw\r\nINNER JOIN [MANUFASPCPD].[dbo].[MANUFA_F_PD_DT_REQ_HED] hed \r\nON pw.PO_Number = hed.AUFNR\r\nINNER JOIN [F2Database].[dbo].[F2_Inspection_H_location] LC \r\nON pw.nameMachine = LC.Machine\r\nWHERE hed.PHTX = (\r\nSELECT TOP 1 PHTX \r\nFROM [MANUFASPCPD].[dbo].[MANUFA_F_PD_DT_REQ_HED]\r\nWHERE AUFNR = @PO_search\r\n)\r\nAND pw.Saved_At >= @date\r\nAND (hed.LOEKZ <> 'X' OR hed.LOEKZ IS NULL);";
+    "SELECT DISTINCT\r\npw.PO_Number,\r\npw.NumInspec,\r\nhed.PSTX,\r\nhed.PHTX,\r\npw.Saved_At,\r\nLC.index_terminal,\r\npw.nameMachine\r\nFROM [KVH].[dbo].[POWip] pw\r\nINNER JOIN [MANUFASPCPD].[dbo].[MANUFA_F_PD_DT_REQ_HED] hed \r\nON pw.PO_Number = hed.AUFNR\r\nINNER JOIN [F2Database].[dbo].[F2_Inspection_H_location] LC \r\nON pw.nameMachine = LC.Machine\r\nWHERE hed.PHTX = (\r\nSELECT TOP 1 PHTX \r\nFROM [MANUFASPCPD].[dbo].[MANUFA_F_PD_DT_REQ_HED]\r\nWHERE AUFNR = @PO_search\r\n)\r\nAND pw.Saved_At >= @date\r\nAND (hed.LOEKZ <> 'X' OR hed.LOEKZ IS NULL);";
         private static string query_check_PO { get; } = "select [PO_Check] FROM [KVH].[dbo].[UsersTablet]";
         private static string query_Get_ins { get; } = "select top(1) * from [KVH].[dbo].[UsersTablet] where nameMachine = @machine order by dateCreated desc ";
+        // sơ đồ máy: vị trí từ MachineLayout, số bàn từ F2_Inspection_H_location
+        private static string query_get_machine_layout { get; } = @"
+SELECT ml.Id, ml.MachineName, ml.RowNo, ml.ColNo, LC.index_terminal
+FROM [KVH].[dbo].[MachineLayout] ml
+OUTER APPLY
+(
+    SELECT TOP 1 h.index_terminal
+    FROM [F2Database].[dbo].[F2_Inspection_H_location] h
+    WHERE h.Machine = ml.MachineName
+) LC
+WHERE ml.IsActive = 1
+ORDER BY ml.ColNo, ml.RowNo;";
+
+        /// <summary>
+        /// Lấy sơ đồ máy từ DB. Nếu chưa có bảng / bảng trống / lỗi kết nối thì dùng sơ đồ mặc định.
+        /// </summary>
+        public async Task<List<MachineSlot>> GetMachineLayout()
+        {
+            var result = new List<MachineSlot>();
+            using (SqlConnection connect = new SqlConnection(connectionString))
+            {
+                try
+                {
+                    await connect.OpenAsync();
+                    using (SqlCommand cmd = new SqlCommand(query_get_machine_layout, connect))
+                    using (SqlDataReader reader = await cmd.ExecuteReaderAsync())
+                    {
+                        while (await reader.ReadAsync())
+                        {
+                            int.TryParse(reader["Id"]?.ToString(), out int id);
+                            int.TryParse(reader["RowNo"]?.ToString(), out int row);
+                            int.TryParse(reader["ColNo"]?.ToString(), out int col);
+                            result.Add(new MachineSlot
+                            {
+                                Id = id,
+                                MachineName = reader["MachineName"]?.ToString()?.Trim() ?? "",
+                                RowNo = Math.Max(1, row),
+                                ColNo = Math.Max(1, col),
+                                IndexTerminal = reader["index_terminal"]?.ToString() ?? "",
+                            });
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine("Lỗi lấy sơ đồ máy (dùng sơ đồ mặc định): " + ex.Message);
+                }
+            }
+            return result.Count > 0 ? result : MachineSlot.Defaults();
+        }
+
+        private static string query_update_machine_name { get; } = @"
+UPDATE [KVH].[dbo].[MachineLayout]
+SET MachineName = @name, UpdatedBy = @by, UpdatedAt = GETDATE()
+WHERE Id = @id;";
+
+        /// <summary>
+        /// Đổi mã máy của 1 ô trên sơ đồ. Trả về null nếu thành công, ngược lại là thông báo lỗi.
+        /// </summary>
+        public async Task<string?> UpdateMachineName(int id, string newName, string updatedBy)
+        {
+            using (SqlConnection connect = new SqlConnection(connectionString))
+            {
+                try
+                {
+                    await connect.OpenAsync();
+                    using (SqlCommand cmd = new SqlCommand(query_update_machine_name, connect))
+                    {
+                        cmd.Parameters.AddWithValue("@name", newName.Trim());
+                        cmd.Parameters.AddWithValue("@by", updatedBy.Trim());
+                        cmd.Parameters.AddWithValue("@id", id);
+                        int rows = await cmd.ExecuteNonQueryAsync();
+                        return rows > 0 ? null : "Không tìm thấy máy này trên DB (có thể đã bị xóa).";
+                    }
+                }
+                catch (SqlException ex) when (ex.Number == 2627 || ex.Number == 2601)
+                {
+                    return $"Mã máy '{newName.Trim()}' đã có trên sơ đồ.";
+                }
+                catch (SqlException ex) when (ex.Number == 207)
+                {
+                    return "Bảng MachineLayout thiếu cột UpdatedBy. Hãy chạy lại script SQL/Scripts/MachineLayout.sql.";
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine("Lỗi cập nhật mã máy: " + ex.Message);
+                    return "Lỗi khi lưu: " + ex.Message;
+                }
+            }
+        }
 
 
         public async Task<bool> InsertPOWIP(string po, string ins, string machine)
@@ -314,6 +404,7 @@ SELECT
                                     SavedAt = savedDate,
                                     Roname = reader["PHTX"]?.ToString() ?? "",
                                     Index = reader["index_terminal"]?.ToString() ?? "",
+                                    MachineName = reader["nameMachine"]?.ToString()?.Trim() ?? "",
                                 });
                             }
                         }

@@ -13,6 +13,7 @@ namespace Inspection_Control_App.Model
         public string Typename { get; set; }
         public string Roname { get; set; }
         public string Index { get; set; }
+        public string MachineName { get; set; } // máy (tablet) đang giữ PO
         public StatusCheck Status { get; set; } // Đang check, Rảnh
         public DateTime? SavedAt { get; set; }
     }

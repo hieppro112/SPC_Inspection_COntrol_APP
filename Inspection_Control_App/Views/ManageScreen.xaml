@@ -8,7 +8,8 @@
             xmlns:local="clr-namespace:Inspection_Control_App.Views"
             mc:Ignorable="d"
         Icon="/Views/project-manager.ico"
-             Background="#181818" Foreground="White" Height="561" Width="787" Title="Manager WIP"
+             Background="#181818" Foreground="White" Height="820" Width="787" Title="Manager WIP"
+             Loaded="Window_Loaded"
              >
 
     <Grid Margin="16">
@@ -17,7 +18,9 @@
             <RowDefinition Height="Auto"/>
             <!-- Row 1: Khung nhập thông tin (2 Ô) -->
             <RowDefinition Height="Auto"/>
-            <!-- Row 2: Bảng hiển thị DataGrid -->
+            <!-- Row 2: Sơ đồ máy -->
+            <RowDefinition Height="Auto"/>
+            <!-- Row 3: Bảng hiển thị DataGrid -->
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
 
@@ -199,8 +202,11 @@ PopupAnimation="Slide">
             </Grid>
         </Border>
 
-        <!-- ================= 2. BẢNG HIỂN THỊ DATAGRID ================= -->
-        <DataGrid Grid.Row="2" x:Name="dgCheckStatus" AutoGenerateColumns="False" CanUserAddRows="False" 
+        <!-- ================= 2. SƠ ĐỒ MÁY ================= -->
+        <local:MachineMapControl x:Name="machineMap" Grid.Row="2" Margin="0,0,0,16"/>
+
+        <!-- ================= 3. BẢNG HIỂN THỊ DATAGRID ================= -->
+        <DataGrid Grid.Row="3" x:Name="dgCheckStatus" AutoGenerateColumns="False" CanUserAddRows="False" 
                   IsReadOnly="True" Background="#252526" RowBackground="#1E1E1E" AlternationCount="2"
 AlternatingRowBackground="#252526"
                   GridLinesVisibility="Horizontal" HorizontalGridLinesBrush="#3F3F46" HeadersVisibility="Column"
