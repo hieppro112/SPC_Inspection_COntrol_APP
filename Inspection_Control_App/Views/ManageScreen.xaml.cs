@@ -28,15 +28,16 @@ namespace Inspection_Control_App.Views
         private MySQL _mySQL;
         private bool check_nv;
         private DateTime date_All_PO;
-        // MSNV quản lý đã xác nhận thành công (dùng để ghi UpdatedBy khi đổi mã máy)
+        // MSNV quản lý đã xác nhận thành công (ghi vào UpdatedBy khi lưu sơ đồ)
         private string verifiedManagerId = "";
+        private bool closeConfirmed;
         public ManageScreen()
         {
             _mySQL = new MySQL();
             InitializeComponent();
             date_All_PO = DateTime.Now.AddDays(-6);
             checkStatusList = new List<CheckStatusModel>();
-            machineMap.MachineClicked += MachineMap_MachineClicked;
+            machineMap.EditStateChanged += UpdateEditUi;
         }
 
         private async void Window_Loaded(object sender, RoutedEventArgs e)
@@ -45,29 +46,81 @@ namespace Inspection_Control_App.Views
             machineMap.Highlight(null, Environment.MachineName);
         }
 
-        // Nhấn vào 1 máy trên sơ đồ → đổi mã máy
-        private async void MachineMap_MachineClicked(MachineSlot slot)
+        // ================= Chỉnh sửa sơ đồ máy =================
+
+        private void UpdateEditUi()
+        {
+            bool verified = !string.IsNullOrEmpty(verifiedManagerId);
+            bool editing = machineMap.IsEditing;
+
+            btnEditMap.Visibility = verified && !editing ? Visibility.Visible : Visibility.Collapsed;
+            btnEditMap.IsEnabled = machineMap.CanEdit;
+            btnEditMap.ToolTip = machineMap.CanEdit
+                ? "Kéo thả, thêm, xóa, đổi mã máy"
+                : "Sơ đồ đang dùng dữ liệu mặc định. Hãy chạy script SQL/Scripts/MachineLayout.sql trước.";
+
+            pnlEditBar.Visibility = editing ? Visibility.Visible : Visibility.Collapsed;
+            btnSaveMap.IsEnabled = machineMap.HasChanges;
+            lblMapChanges.Visibility = editing ? Visibility.Visible : Visibility.Collapsed;
+            lblMapChanges.Text = machineMap.HasChanges
+                ? $"● Có {machineMap.ChangeCount} thay đổi chưa lưu"
+                : "Chưa có thay đổi";
+        }
+
+        private void btnEditMap_Click(object sender, RoutedEventArgs e)
+        {
+            if (!machineMap.BeginEdit())
+                MessageBox.Show(this, "Sơ đồ đang dùng dữ liệu mặc định vì chưa có bảng MachineLayout trên DB.\n" +
+                    "Hãy chạy script SQL/Scripts/MachineLayout.sql trước.",
+                    "Chỉnh sửa sơ đồ", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+
+        private async void btnCancelMap_Click(object sender, RoutedEventArgs e)
+        {
+            if (machineMap.HasChanges &&
+                MessageBox.Show(this, "Bỏ tất cả thay đổi chưa lưu?", "Hủy chỉnh sửa",
+                    MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+                return;
+
+            await machineMap.LoadLayoutAsync(_mySQL); // tải lại từ DB, thoát chỉnh sửa
+        }
+
+        private async void btnSaveMap_Click(object sender, RoutedEventArgs e) => await SaveMapAsync();
+
+        /// <summary>Lưu sơ đồ. Trả về true nếu đã lưu (hoặc không có gì để lưu).</summary>
+        private async Task<bool> SaveMapAsync()
         {
             if (string.IsNullOrEmpty(verifiedManagerId) || txtID.Text.Trim() != verifiedManagerId)
             {
-                MessageBox.Show(this, "Vui lòng nhập và xác nhận lại Mã Số Quản lý trước khi đổi mã máy.",
-                    "Đổi mã máy", MessageBoxButton.OK, MessageBoxImage.Warning);
-                return;
-            }
-            if (slot.Id <= 0)
-            {
-                MessageBox.Show(this, "Sơ đồ đang dùng dữ liệu mặc định vì chưa có bảng MachineLayout trên DB.\n" +
-                    "Hãy chạy script SQL/Scripts/MachineLayout.sql trước.",
-                    "Đổi mã máy", MessageBoxButton.OK, MessageBoxImage.Information);
-                return;
+                MessageBox.Show(this, "Mã Số Quản lý đã thay đổi. Vui lòng bấm XÁC NHẬN lại trước khi lưu.",
+                    "Lưu sơ đồ", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return false;
             }
 
-            var dialog = new EditMachineDialog(slot, _mySQL, verifiedManagerId) { Owner = this };
-            if (dialog.ShowDialog() == true)
+            btnSaveMap.IsEnabled = false;
+            string? error = await machineMap.SaveAsync(_mySQL, verifiedManagerId);
+            UpdateEditUi();
+            if (error != null)
             {
-                await machineMap.LoadLayoutAsync(_mySQL);
-                machineMap.Highlight(checkStatusList, Environment.MachineName);
+                MessageBox.Show(this, error, "Lưu sơ đồ", MessageBoxButton.OK, MessageBoxImage.Error);
+                return false;
             }
+            machineMap.Highlight(checkStatusList, Environment.MachineName);
+            return true;
+        }
+
+        private async void Window_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
+        {
+            if (closeConfirmed || !machineMap.HasChanges) return;
+
+            e.Cancel = true;
+            var answer = MessageBox.Show(this, "Sơ đồ máy có thay đổi chưa lưu. Lưu trước khi đóng?",
+                "Đóng màn quản lý", MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
+            if (answer == MessageBoxResult.Cancel) return;
+            if (answer == MessageBoxResult.Yes && !await SaveMapAsync()) return;
+
+            closeConfirmed = true;
+            Close();
         }
 
         private async void btnSubmit_Click(object sender, RoutedEventArgs e)
@@ -89,14 +142,21 @@ namespace Inspection_Control_App.Views
                 dgCheckStatus.ItemsSource = checkStatusList;
                 machineMap.Highlight(checkStatusList, Environment.MachineName);
                 verifiedManagerId = txtID.Text.Trim();
-                machineMap.IsEditable = true;
+                UpdateEditUi();
             }
             else
             {
                 checkStatusList = new List<CheckStatusModel>();
                 machineMap.Highlight(null, Environment.MachineName);
                 verifiedManagerId = "";
-                machineMap.IsEditable = false;
+                if (machineMap.IsEditing)
+                {
+                    if (machineMap.HasChanges)
+                        MessageBox.Show(this, "Mã Số Quản lý không hợp lệ. Các thay đổi sơ đồ chưa lưu đã bị bỏ.",
+                            "Chỉnh sửa sơ đồ", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    machineMap.CancelEdit();
+                }
+                UpdateEditUi();
                 txtID.BorderBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#FF5555")); // Viền đỏ
                 txtID.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#2A1818"));  // Nền đỏ nhạt
                 lbl_id_manager.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#FF5555"));

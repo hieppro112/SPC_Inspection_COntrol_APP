@@ -10,7 +10,10 @@ namespace Inspection_Control_App.SQL
         private static string connectionString { get; } = "Data Source=192.168.122.2;Initial Catalog=KVH;User ID=kvh_write;Password=kvh_wr0te@";
         //dl nhan vien
         private static string connection_Employee { get; } = @"Data Source=192.168.0.11;Initial Catalog=SGPrecision;User ID=hrmsadmin;Password=adminhrms;Max Pool Size=50;Application Name=Molybden_DL;";
-        private static string query_id_get_name { get; } = "select [Position(E)] from DataSPC where [Code] = @idNV";
+        //private static string connection_Employee { get; } = @"Data Source=192.168.122.2;Initial Catalog=F2Database;User ID=kproduct;Password=Tanphat@02032013;";
+
+        private static string query_id_get_name { get; } = "select [Position(E)] from dbo.DataSPC where [Code] = @idNV";
+        //private static string query_id_get_name { get; } = "select Name from SGPrecision.dbo.Data_F2 fhd  where [Code] = @idNV";
 
         //private static string query_insertPO { get; } = "Insert MANUFA_F2_PO_WIP(PO_Number,NumInspec,nameMachine) values (@PO_Add,@Num,@machine)";
         private static string query_insertPO { get; } = "IF NOT EXISTS (\r\n    SELECT 1 \r\n    FROM [KVH].[dbo].[POWip] \r\n    WHERE PO_Number = @PO_Add AND nameMachine = @machine\r\n)\r\nBEGIN\r\n    INSERT INTO [KVH].[dbo].[POWip] (PO_Number, NumInspec, Saved_At, nameMachine)\r\n    VALUES (@PO_Add, @Num, GETDATE(), @machine);\r\nEND";
@@ -133,33 +136,91 @@ ORDER BY ml.ColNo, ml.RowNo;";
             return result.Count > 0 ? result : MachineSlot.Defaults();
         }
 
-        private static string query_update_machine_name { get; } = @"
+        private static string query_delete_machine { get; } =
+            "DELETE FROM [KVH].[dbo].[MachineLayout] WHERE Id = @id;";
+        // dời tạm sang vị trí/mã không thể trùng để tránh UNIQUE khi đổi chỗ hoặc đổi mã chéo
+        private static string query_park_machine { get; } =
+            "UPDATE [KVH].[dbo].[MachineLayout] SET RowNo = -Id, ColNo = -Id, MachineName = CONCAT(N'~tmp~', Id) WHERE Id = @id;";
+        private static string query_update_machine { get; } = @"
 UPDATE [KVH].[dbo].[MachineLayout]
-SET MachineName = @name, UpdatedBy = @by, UpdatedAt = GETDATE()
+SET MachineName = @name, RowNo = @row, ColNo = @col, UpdatedBy = @by, UpdatedAt = GETDATE()
 WHERE Id = @id;";
+        private static string query_insert_machine { get; } = @"
+INSERT INTO [KVH].[dbo].[MachineLayout] (MachineName, RowNo, ColNo, IsActive, UpdatedBy, UpdatedAt)
+VALUES (@name, @row, @col, 1, @by, GETDATE());";
+
+        private class StaleLayoutException : Exception { }
 
         /// <summary>
-        /// Đổi mã máy của 1 ô trên sơ đồ. Trả về null nếu thành công, ngược lại là thông báo lỗi.
+        /// Ghi bản nháp sơ đồ máy xuống DB trong 1 transaction:
+        /// xóa → dời tạm máy thay đổi → cập nhật vị trí/mã cuối → thêm máy mới.
+        /// Trả về null nếu thành công, ngược lại là thông báo lỗi (DB giữ nguyên).
         /// </summary>
-        public async Task<string?> UpdateMachineName(int id, string newName, string updatedBy)
+        public async Task<string?> SaveMachineLayout(LayoutDraft draft, string updatedBy)
         {
+            var changed = draft.ChangedExisting.ToList();
+            var added = draft.Added.ToList();
+            string by = (updatedBy ?? "").Trim();
+
             using (SqlConnection connect = new SqlConnection(connectionString))
             {
                 try
                 {
                     await connect.OpenAsync();
-                    using (SqlCommand cmd = new SqlCommand(query_update_machine_name, connect))
+                    using (SqlTransaction tran = connect.BeginTransaction())
                     {
-                        cmd.Parameters.AddWithValue("@name", newName.Trim());
-                        cmd.Parameters.AddWithValue("@by", updatedBy.Trim());
-                        cmd.Parameters.AddWithValue("@id", id);
-                        int rows = await cmd.ExecuteNonQueryAsync();
-                        return rows > 0 ? null : "Không tìm thấy máy này trên DB (có thể đã bị xóa).";
+                        try
+                        {
+                            async Task Exec(string sql, Action<SqlParameterCollection> fill, bool mustAffect)
+                            {
+                                using var cmd = new SqlCommand(sql, connect, tran);
+                                fill(cmd.Parameters);
+                                int rows = await cmd.ExecuteNonQueryAsync();
+                                if (mustAffect && rows == 0) throw new StaleLayoutException();
+                            }
+
+                            foreach (int id in draft.DeletedIds)
+                                await Exec(query_delete_machine, p => p.AddWithValue("@id", id), mustAffect: false);
+
+                            foreach (var s in changed)
+                                await Exec(query_park_machine, p => p.AddWithValue("@id", s.Id), mustAffect: true);
+
+                            foreach (var s in changed)
+                                await Exec(query_update_machine, p =>
+                                {
+                                    p.AddWithValue("@name", s.MachineName.Trim());
+                                    p.AddWithValue("@row", s.RowNo);
+                                    p.AddWithValue("@col", s.ColNo);
+                                    p.AddWithValue("@by", by);
+                                    p.AddWithValue("@id", s.Id);
+                                }, mustAffect: true);
+
+                            foreach (var s in added)
+                                await Exec(query_insert_machine, p =>
+                                {
+                                    p.AddWithValue("@name", s.MachineName.Trim());
+                                    p.AddWithValue("@row", s.RowNo);
+                                    p.AddWithValue("@col", s.ColNo);
+                                    p.AddWithValue("@by", by);
+                                }, mustAffect: true);
+
+                            tran.Commit();
+                            return null;
+                        }
+                        catch
+                        {
+                            tran.Rollback();
+                            throw;
+                        }
                     }
+                }
+                catch (StaleLayoutException)
+                {
+                    return "Sơ đồ trên DB đã bị thay đổi ở nơi khác. Hãy bấm Hủy để tải lại rồi sửa lại.";
                 }
                 catch (SqlException ex) when (ex.Number == 2627 || ex.Number == 2601)
                 {
-                    return $"Mã máy '{newName.Trim()}' đã có trên sơ đồ.";
+                    return "Có mã máy hoặc vị trí bị trùng trên DB. Hãy bấm Hủy để tải lại rồi sửa lại.";
                 }
                 catch (SqlException ex) when (ex.Number == 207)
                 {

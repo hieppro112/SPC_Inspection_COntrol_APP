@@ -76,6 +76,7 @@ namespace Inspection_Control_App.Views
                 checkStatusList.Clear();
                 checkStatusList = await _mySQL.GetPOByPSTX(txtPoStayCheck.Text,date_All_PO);
                 dgCheckStatus.ItemsSource = checkStatusList;
+                await machineMap.LoadLayoutAsync(_mySQL); // lấy thay đổi sơ đồ từ màn Manage
                 machineMap.Highlight(checkStatusList, device);
 
                 await Task.Delay(20000);
