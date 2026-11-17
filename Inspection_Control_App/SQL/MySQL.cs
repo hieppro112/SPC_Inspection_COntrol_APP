@@ -1,4 +1,5 @@
-﻿using Inspection_Control_App.Model;
+﻿using Inspection_Control_App.Helper;
+using Inspection_Control_App.Model;
 using System.Data.SqlClient;
 using System.Diagnostics;
 using System.Reflection.PortableExecutable;
@@ -127,14 +128,19 @@ ORDER BY ml.ColNo, ml.RowNo;";
                             });
                         }
                     }
+                    _layoutErrorLogged = false;
                 }
                 catch (Exception ex)
                 {
-                    Debug.WriteLine("Lỗi lấy sơ đồ máy (dùng sơ đồ mặc định): " + ex.Message);
+                    // hàm này chạy mỗi 20s → chỉ ghi log lần đầu của mỗi đợt lỗi
+                    if (!_layoutErrorLogged)
+                        AppLog.Error("Lỗi lấy sơ đồ máy (dùng sơ đồ mặc định)", ex);
+                    _layoutErrorLogged = true;
                 }
             }
             return result.Count > 0 ? result : MachineSlot.Defaults();
         }
+        private static bool _layoutErrorLogged;
 
         private static string query_delete_machine { get; } =
             "DELETE FROM [KVH].[dbo].[MachineLayout] WHERE Id = @id;";
@@ -228,7 +234,7 @@ VALUES (@name, @row, @col, 1, @by, GETDATE());";
                 }
                 catch (Exception ex)
                 {
-                    Debug.WriteLine("Lỗi cập nhật mã máy: " + ex.Message);
+                    AppLog.Error("Lỗi lưu sơ đồ máy", ex);
                     return "Lỗi khi lưu: " + ex.Message;
                 }
             }
@@ -241,9 +247,8 @@ VALUES (@name, @row, @col, 1, @by, GETDATE());";
             {
                 try
                 {
-                    connection.Open();
-                    SqlCommand command = new SqlCommand(query_insertPO, connection);
-
+                    await connection.OpenAsync();
+                    using SqlCommand command = new SqlCommand(query_insertPO, connection);
 
                     command.Parameters.AddWithValue("@PO_Add", po);
                     command.Parameters.AddWithValue("@Num", ins);
@@ -256,7 +261,7 @@ VALUES (@name, @row, @col, 1, @by, GETDATE());";
 
                 catch (Exception ex)
                 {
-                    Debug.WriteLine("loi khi them du lieu: " + ex);
+                    AppLog.Error($"Lỗi thêm PO WIP '{po}'", ex);
                     return false;
                 }
             }
@@ -270,7 +275,7 @@ VALUES (@name, @row, @col, 1, @by, GETDATE());";
                 try
                 {
                     await connect.OpenAsync();
-                    SqlCommand cmd = new SqlCommand(query_data_table_WIP, connect);
+                    using SqlCommand cmd = new SqlCommand(query_data_table_WIP, connect);
                     cmd.Parameters.AddWithValue("PO_num", po.ToString().Trim());
                     using (SqlDataReader reader = await cmd.ExecuteReaderAsync())
                     {
@@ -298,7 +303,7 @@ VALUES (@name, @row, @col, 1, @by, GETDATE());";
                 }
                 catch (Exception ex)
                 {
-                    Debug.WriteLine("Xay ra loi trong qua trinh get data: " + ex.Message);
+                    AppLog.Error($"Lỗi lấy thông tin PO '{po}'", ex);
                     return null;
                 }
             }
@@ -310,7 +315,7 @@ VALUES (@name, @row, @col, 1, @by, GETDATE());";
                 try
                 {
                     await connect.OpenAsync();
-                    SqlCommand cmd = new SqlCommand(query_Get_ins, connect);
+                    using SqlCommand cmd = new SqlCommand(query_Get_ins, connect);
                     cmd.Parameters.AddWithValue("@machine", machine.ToString().Trim());
                     using (SqlDataReader reader = await cmd.ExecuteReaderAsync())
                     {
@@ -330,7 +335,7 @@ VALUES (@name, @row, @col, 1, @by, GETDATE());";
                 }
                 catch (Exception ex)
                 {
-                    Debug.WriteLine("Xay ra loi trong qua trinh get data: " + ex.Message);
+                    AppLog.Error($"Lỗi lấy bàn / PO đang check của máy '{machine}'", ex);
                     return null;
                 }
             }
@@ -344,7 +349,7 @@ VALUES (@name, @row, @col, 1, @by, GETDATE());";
                 try
                 {
                     connect.Open();
-                    SqlCommand cmd = new SqlCommand(query_data_table_WIP, connect);
+                    using SqlCommand cmd = new SqlCommand(query_data_table_WIP, connect);
 
                     // Nếu câu truy vấn của bạn có tham số @PO_num
                     // Trường hợp po null hoặc rỗng thì truyền DBNull.Value (để lấy tất cả nếu query hỗ trợ)
@@ -384,7 +389,7 @@ VALUES (@name, @row, @col, 1, @by, GETDATE());";
                 }
                 catch (Exception ex)
                 {
-                    Debug.WriteLine("Xay ra loi trong qua trinh get list data: " + ex.Message);
+                    AppLog.Error($"Lỗi lấy danh sách PO '{po}'", ex);
                 }
             }
 
@@ -398,9 +403,8 @@ VALUES (@name, @row, @col, 1, @by, GETDATE());";
             {
                 try
                 {
-                    connect.Open();
-                    // Không cần thêm cmd.Parameters nữa
-                    SqlCommand cmd = new SqlCommand(query_Get_ALL_table_WIP, connect);
+                    await connect.OpenAsync(); // không chặn giao diện khi chờ kết nối
+                    using SqlCommand cmd = new SqlCommand(query_Get_ALL_table_WIP, connect);
                     cmd.Parameters.AddWithValue("@machine", machine);
                     cmd.Parameters.AddWithValue("@date", dateSearch);
 
@@ -428,7 +432,7 @@ VALUES (@name, @row, @col, 1, @by, GETDATE());";
                 }
                 catch (Exception ex)
                 {
-                    Debug.WriteLine("Lỗi khi lấy danh sách PO: " + ex.Message);
+                    AppLog.Error($"Lỗi lấy danh sách PO WIP của máy '{machine}'", ex);
                 }
             }
 
@@ -461,7 +465,7 @@ VALUES (@name, @row, @col, 1, @by, GETDATE());";
                                     PONumber = valuePO,
                                     NumInspec = reader["NumInspec"]?.ToString() ?? "",
                                     Typename = reader["PSTX"]?.ToString() ?? "",
-                                    Status = await CheckPO(valuePO)?StatusCheck.Checking:StatusCheck.Normal,
+                                    Status = StatusCheck.Normal, // gán sau bằng 1 query chung
                                     SavedAt = savedDate,
                                     Roname = reader["PHTX"]?.ToString() ?? "",
                                     Index = reader["index_terminal"]?.ToString() ?? "",
@@ -470,14 +474,45 @@ VALUES (@name, @row, @col, 1, @by, GETDATE());";
                             }
                         }
                     }
+
+                    // Trạng thái "Checking": 1 query cho cả danh sách thay vì đọc cả bảng UsersTablet cho từng PO
+                    var checking = await GetCheckingPOs(connect, result.Select(r => r.PONumber));
+                    foreach (var row in result)
+                        if (checking.Contains(row.PONumber)) row.Status = StatusCheck.Checking;
+
                     return result;
                 }
                 catch (Exception ex)
                 {
-                    Debug.WriteLine("Lỗi get data WIP: " + ex.Message);
+                    AppLog.Error($"Lỗi lấy PO cùng type với '{poNum}'", ex);
                     return [];
                 }
             }
+        }
+
+        /// <summary>Các PO trong danh sách đang có trong UsersTablet.PO_Check (đang được check).</summary>
+        private static async Task<HashSet<string>> GetCheckingPOs(SqlConnection connect, IEnumerable<string> poNumbers)
+        {
+            var found = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var pos = poNumbers.Where(p => !string.IsNullOrWhiteSpace(p)).Select(p => p.Trim())
+                               .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+
+            // SQL Server giới hạn ~2100 tham số / câu → chia lô 500
+            for (int i = 0; i < pos.Count; i += 500)
+            {
+                var batch = pos.Skip(i).Take(500).ToList();
+                var names = batch.Select((_, k) => "@p" + k).ToList();
+                using var cmd = new SqlCommand(
+                    $"SELECT DISTINCT PO_Check FROM [KVH].[dbo].[UsersTablet] WHERE PO_Check IN ({string.Join(",", names)})",
+                    connect);
+                for (int k = 0; k < batch.Count; k++)
+                    cmd.Parameters.AddWithValue(names[k], batch[k]);
+
+                using var reader = await cmd.ExecuteReaderAsync();
+                while (await reader.ReadAsync())
+                    found.Add(reader["PO_Check"]?.ToString()?.Trim() ?? "");
+            }
+            return found;
         }
 
         public async Task<List<string>> Get_list_checking()
@@ -500,25 +535,29 @@ VALUES (@name, @row, @col, 1, @by, GETDATE());";
                 }
                 catch (Exception ex)
                 {
-                    Debug.WriteLine("Lỗi khi lấy danh sách PO: " + ex.Message);
+                    AppLog.Error("Lỗi lấy danh sách PO đang check", ex);
                 }
             }
 
             return listPO;
         }
 
-        //check stt PO 
+        //check stt PO
         public async Task<bool> CheckPO(string po)
         {
-            var list = await Get_list_checking();
-            foreach (var item in list)
+            using (SqlConnection connect = new SqlConnection(connectionString))
             {
-                if (item == po)
+                try
                 {
-                    return true;
+                    await connect.OpenAsync();
+                    return (await GetCheckingPOs(connect, new[] { po })).Count > 0;
+                }
+                catch (Exception ex)
+                {
+                    AppLog.Error($"Lỗi kiểm tra PO đang check '{po}'", ex);
+                    return false;
                 }
             }
-            return false;
         }
 
 
@@ -549,6 +588,7 @@ VALUES (@name, @row, @col, 1, @by, GETDATE());";
             }
             catch(Exception ex)
             {
+                AppLog.Error($"Lỗi kiểm tra MSNV '{id}'", ex);
                 return false;
             }
         }

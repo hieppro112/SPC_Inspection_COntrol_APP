@@ -82,8 +82,29 @@ namespace Inspection_Control_App.Views
         {
             var slots = await sql.GetMachineLayout();
             if (_pressSlot != null) return; // đang kéo → bỏ qua lần tải này
+
+            // Không đổi gì so với lần trước → giữ nguyên, không vẽ lại (màn chính gọi mỗi 20s)
+            if (!IsEditing && MapGrid.Children.Count > 0 && SameLayout(_slots, slots))
+            {
+                // chỉ cập nhật số bàn (binding tự đổi, không cần vẽ lại)
+                var fresh = slots.ToDictionary(LayoutKey);
+                foreach (var s in _slots)
+                    if (fresh.TryGetValue(LayoutKey(s), out var f) && !string.IsNullOrWhiteSpace(f.IndexTerminal))
+                        s.IndexTerminal = f.IndexTerminal;
+                return;
+            }
+
             _slots = slots;
             ExitEdit();
+        }
+
+        private static string LayoutKey(MachineSlot s) => $"{s.Id}|{s.MachineName}|{s.RowNo}|{s.ColNo}";
+
+        private static bool SameLayout(List<MachineSlot> a, List<MachineSlot> b)
+        {
+            if (a.Count != b.Count) return false;
+            var keys = a.Select(LayoutKey).ToHashSet();
+            return b.All(s => keys.Contains(LayoutKey(s)));
         }
 
         /// <summary>Vào chế độ chỉnh sửa. Trả về false nếu không thể (đang dùng sơ đồ mặc định).</summary>
