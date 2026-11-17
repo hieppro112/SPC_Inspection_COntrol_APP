@@ -1,30 +1,38 @@
-using Inspection_Control_App.Model;
-using Inspection_Control_App.SQL;
 using System.Windows;
 using System.Windows.Input;
 
 namespace Inspection_Control_App.Views
 {
     /// <summary>
-    /// Hộp thoại đổi mã máy của 1 ô trên sơ đồ, lưu thẳng vào bảng [KVH].[dbo].[MachineLayout].
+    /// Hộp thoại nhập mã máy (dùng cho Thêm máy và Đổi mã máy).
+    /// Không ghi DB: chỉ trả về mã mới, việc lưu do nút Lưu của chế độ chỉnh sửa đảm nhận.
     /// </summary>
     public partial class EditMachineDialog : Window
     {
-        private readonly MachineSlot _slot;
-        private readonly MySQL _mySQL;
-        private readonly string _updatedBy;
+        private readonly string _currentName;
+        private readonly Func<string, string?> _validate;
 
-        public EditMachineDialog(MachineSlot slot, MySQL mySQL, string updatedBy)
+        /// <summary>Mã máy mới (đã Trim) khi DialogResult = true.</summary>
+        public string NewName { get; private set; } = "";
+
+        /// <param name="title">Tiêu đề, ví dụ "THÊM MÁY" / "ĐỔI MÃ MÁY".</param>
+        /// <param name="positionText">Dòng mô tả vị trí.</param>
+        /// <param name="currentName">Mã hiện tại ("" khi thêm mới).</param>
+        /// <param name="validate">Trả về null nếu hợp lệ, ngược lại là thông báo lỗi.</param>
+        public EditMachineDialog(string title, string positionText, string currentName, Func<string, string?> validate)
         {
             InitializeComponent();
-            _slot = slot;
-            _mySQL = mySQL;
-            _updatedBy = updatedBy;
+            _currentName = currentName ?? "";
+            _validate = validate;
 
-            TxtPosition.Text = $"Vị trí: hàng {slot.RowNo}, cột {slot.ColNo}"
-                + (string.IsNullOrWhiteSpace(slot.IndexTerminal) ? "" : $"  ·  Bàn {slot.IndexTerminal}");
-            TxtOld.Text = slot.MachineName;
-            TxtNew.Text = slot.MachineName;
+            Title = title;
+            TxtTitle.Text = title;
+            TxtPosition.Text = positionText;
+            TxtNew.Text = _currentName;
+
+            bool isNew = string.IsNullOrEmpty(_currentName);
+            PnlOld.Visibility = isNew ? Visibility.Collapsed : Visibility.Visible;
+            TxtOld.Text = _currentName;
             BtnUseThis.ToolTip = $"Điền tên máy đang chạy app: {Environment.MachineName}";
 
             Loaded += (_, _) => { TxtNew.Focus(); TxtNew.SelectAll(); };
@@ -36,47 +44,32 @@ namespace Inspection_Control_App.Views
             TxtNew.Focus();
         }
 
-        private async void TxtNew_KeyDown(object sender, KeyEventArgs e)
+        private void TxtNew_KeyDown(object sender, KeyEventArgs e)
         {
-            if (e.Key == Key.Enter) await SaveAsync();
+            if (e.Key == Key.Enter) Confirm();
         }
 
-        private async void BtnSave_Click(object sender, RoutedEventArgs e)
-        {
-            await SaveAsync();
-        }
+        private void BtnSave_Click(object sender, RoutedEventArgs e) => Confirm();
 
-        private async Task SaveAsync()
+        private void Confirm()
         {
-            string newName = TxtNew.Text.Trim();
-
-            if (string.IsNullOrEmpty(newName))
-            {
-                ShowError("Vui lòng nhập mã máy.");
-                return;
-            }
-            if (string.Equals(newName, _slot.MachineName, StringComparison.Ordinal))
+            string name = TxtNew.Text.Trim();
+            if (name == _currentName)
             {
                 DialogResult = false; // không đổi gì
                 return;
             }
 
-            BtnSave.IsEnabled = false;
-            string? error = await _mySQL.UpdateMachineName(_slot.Id, newName, _updatedBy);
-            BtnSave.IsEnabled = true;
-
+            string? error = _validate(name);
             if (error != null)
             {
-                ShowError(error);
+                TxtError.Text = "⚠ " + error;
+                TxtError.Visibility = Visibility.Visible;
                 return;
             }
-            DialogResult = true;
-        }
 
-        private void ShowError(string message)
-        {
-            TxtError.Text = "⚠ " + message;
-            TxtError.Visibility = Visibility.Visible;
+            NewName = name;
+            DialogResult = true;
         }
     }
 }

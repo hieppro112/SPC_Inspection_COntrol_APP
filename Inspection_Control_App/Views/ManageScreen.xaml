@@ -8,8 +8,8 @@
             xmlns:local="clr-namespace:Inspection_Control_App.Views"
             mc:Ignorable="d"
         Icon="/Views/project-manager.ico"
-             Background="#181818" Foreground="White" Height="820" Width="787" Title="Manager WIP"
-             Loaded="Window_Loaded"
+             Background="#181818" Foreground="White" Height="920" Width="787" Title="Manager WIP"
+             Loaded="Window_Loaded" Closing="Window_Closing"
              >
 
     <Grid Margin="16">
@@ -202,8 +202,36 @@ PopupAnimation="Slide">
             </Grid>
         </Border>
 
-        <!-- ================= 2. SƠ ĐỒ MÁY ================= -->
-        <local:MachineMapControl x:Name="machineMap" Grid.Row="2" Margin="0,0,0,16"/>
+        <!-- ================= 2. SƠ ĐỒ MÁY + THANH CHỈNH SỬA ================= -->
+        <StackPanel Grid.Row="2" Margin="0,0,0,16">
+            <Grid Margin="0,0,0,8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <TextBlock x:Name="lblMapChanges" VerticalAlignment="Center" FontSize="12" Foreground="#E2A03F"
+                           Visibility="Collapsed"/>
+
+                <StackPanel Grid.Column="1" Orientation="Horizontal">
+                    <!-- Vào chế độ chỉnh sửa (hiện sau khi xác nhận MSNV) -->
+                    <Button x:Name="btnEditMap" Content="✏ Chỉnh sửa sơ đồ" Visibility="Collapsed"
+                            Background="#23272E" Foreground="White" BorderBrush="#007ACC" BorderThickness="1"
+                            Padding="14,6" FontWeight="SemiBold" Cursor="Hand" Click="btnEditMap_Click"/>
+                    <!-- Lưu / Hủy (khi đang chỉnh sửa) -->
+                    <StackPanel x:Name="pnlEditBar" Orientation="Horizontal" Visibility="Collapsed">
+                        <Button x:Name="btnCancelMap" Content="↺ Hủy" Margin="0,0,8,0"
+                                Background="#23272E" Foreground="White" BorderBrush="#3F3F46" BorderThickness="1"
+                                Padding="14,6" Cursor="Hand" Click="btnCancelMap_Click"/>
+                        <Button x:Name="btnSaveMap" Content="💾 Lưu"
+                                Background="#007ACC" Foreground="White" BorderThickness="0"
+                                Padding="18,6" FontWeight="Bold" Cursor="Hand" Click="btnSaveMap_Click"/>
+                    </StackPanel>
+                </StackPanel>
+            </Grid>
+
+            <local:MachineMapControl x:Name="machineMap"/>
+        </StackPanel>
 
         <!-- ================= 3. BẢNG HIỂN THỊ DATAGRID ================= -->
         <DataGrid Grid.Row="3" x:Name="dgCheckStatus" AutoGenerateColumns="False" CanUserAddRows="False" 

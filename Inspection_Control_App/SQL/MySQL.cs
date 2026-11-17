@@ -1,4 +1,5 @@
-﻿using Inspection_Control_App.Model;
+﻿using Inspection_Control_App.Helper;
+using Inspection_Control_App.Model;
 using System.Data.SqlClient;
 using System.Diagnostics;
 using System.Reflection.PortableExecutable;
@@ -10,7 +11,10 @@ namespace Inspection_Control_App.SQL
         private static string connectionString { get; } = "Data Source=192.168.122.2;Initial Catalog=KVH;User ID=kvh_write;Password=kvh_wr0te@";
         //dl nhan vien
         private static string connection_Employee { get; } = @"Data Source=192.168.0.11;Initial Catalog=SGPrecision;User ID=hrmsadmin;Password=adminhrms;Max Pool Size=50;Application Name=Molybden_DL;";
-        private static string query_id_get_name { get; } = "select [Position(E)] from DataSPC where [Code] = @idNV";
+        //private static string connection_Employee { get; } = @"Data Source=192.168.122.2;Initial Catalog=F2Database;User ID=kproduct;Password=Tanphat@02032013;";
+
+        private static string query_id_get_name { get; } = "select [Position(E)] from dbo.DataSPC where [Code] = @idNV";
+        //private static string query_id_get_name { get; } = "select Name from SGPrecision.dbo.Data_F2 fhd  where [Code] = @idNV";
 
         //private static string query_insertPO { get; } = "Insert MANUFA_F2_PO_WIP(PO_Number,NumInspec,nameMachine) values (@PO_Add,@Num,@machine)";
         private static string query_insertPO { get; } = "IF NOT EXISTS (\r\n    SELECT 1 \r\n    FROM [KVH].[dbo].[POWip] \r\n    WHERE PO_Number = @PO_Add AND nameMachine = @machine\r\n)\r\nBEGIN\r\n    INSERT INTO [KVH].[dbo].[POWip] (PO_Number, NumInspec, Saved_At, nameMachine)\r\n    VALUES (@PO_Add, @Num, GETDATE(), @machine);\r\nEND";
@@ -124,42 +128,105 @@ ORDER BY ml.ColNo, ml.RowNo;";
                             });
                         }
                     }
+                    _layoutErrorLogged = false;
                 }
                 catch (Exception ex)
                 {
-                    Debug.WriteLine("Lỗi lấy sơ đồ máy (dùng sơ đồ mặc định): " + ex.Message);
+                    // hàm này chạy mỗi 20s → chỉ ghi log lần đầu của mỗi đợt lỗi
+                    if (!_layoutErrorLogged)
+                        AppLog.Error("Lỗi lấy sơ đồ máy (dùng sơ đồ mặc định)", ex);
+                    _layoutErrorLogged = true;
                 }
             }
             return result.Count > 0 ? result : MachineSlot.Defaults();
         }
+        private static bool _layoutErrorLogged;
 
-        private static string query_update_machine_name { get; } = @"
+        private static string query_delete_machine { get; } =
+            "DELETE FROM [KVH].[dbo].[MachineLayout] WHERE Id = @id;";
+        // dời tạm sang vị trí/mã không thể trùng để tránh UNIQUE khi đổi chỗ hoặc đổi mã chéo
+        private static string query_park_machine { get; } =
+            "UPDATE [KVH].[dbo].[MachineLayout] SET RowNo = -Id, ColNo = -Id, MachineName = CONCAT(N'~tmp~', Id) WHERE Id = @id;";
+        private static string query_update_machine { get; } = @"
 UPDATE [KVH].[dbo].[MachineLayout]
-SET MachineName = @name, UpdatedBy = @by, UpdatedAt = GETDATE()
+SET MachineName = @name, RowNo = @row, ColNo = @col, UpdatedBy = @by, UpdatedAt = GETDATE()
 WHERE Id = @id;";
+        private static string query_insert_machine { get; } = @"
+INSERT INTO [KVH].[dbo].[MachineLayout] (MachineName, RowNo, ColNo, IsActive, UpdatedBy, UpdatedAt)
+VALUES (@name, @row, @col, 1, @by, GETDATE());";
+
+        private class StaleLayoutException : Exception { }
 
         /// <summary>
-        /// Đổi mã máy của 1 ô trên sơ đồ. Trả về null nếu thành công, ngược lại là thông báo lỗi.
+        /// Ghi bản nháp sơ đồ máy xuống DB trong 1 transaction:
+        /// xóa → dời tạm máy thay đổi → cập nhật vị trí/mã cuối → thêm máy mới.
+        /// Trả về null nếu thành công, ngược lại là thông báo lỗi (DB giữ nguyên).
         /// </summary>
-        public async Task<string?> UpdateMachineName(int id, string newName, string updatedBy)
+        public async Task<string?> SaveMachineLayout(LayoutDraft draft, string updatedBy)
         {
+            var changed = draft.ChangedExisting.ToList();
+            var added = draft.Added.ToList();
+            string by = (updatedBy ?? "").Trim();
+
             using (SqlConnection connect = new SqlConnection(connectionString))
             {
                 try
                 {
                     await connect.OpenAsync();
-                    using (SqlCommand cmd = new SqlCommand(query_update_machine_name, connect))
+                    using (SqlTransaction tran = connect.BeginTransaction())
                     {
-                        cmd.Parameters.AddWithValue("@name", newName.Trim());
-                        cmd.Parameters.AddWithValue("@by", updatedBy.Trim());
-                        cmd.Parameters.AddWithValue("@id", id);
-                        int rows = await cmd.ExecuteNonQueryAsync();
-                        return rows > 0 ? null : "Không tìm thấy máy này trên DB (có thể đã bị xóa).";
+                        try
+                        {
+                            async Task Exec(string sql, Action<SqlParameterCollection> fill, bool mustAffect)
+                            {
+                                using var cmd = new SqlCommand(sql, connect, tran);
+                                fill(cmd.Parameters);
+                                int rows = await cmd.ExecuteNonQueryAsync();
+                                if (mustAffect && rows == 0) throw new StaleLayoutException();
+                            }
+
+                            foreach (int id in draft.DeletedIds)
+                                await Exec(query_delete_machine, p => p.AddWithValue("@id", id), mustAffect: false);
+
+                            foreach (var s in changed)
+                                await Exec(query_park_machine, p => p.AddWithValue("@id", s.Id), mustAffect: true);
+
+                            foreach (var s in changed)
+                                await Exec(query_update_machine, p =>
+                                {
+                                    p.AddWithValue("@name", s.MachineName.Trim());
+                                    p.AddWithValue("@row", s.RowNo);
+                                    p.AddWithValue("@col", s.ColNo);
+                                    p.AddWithValue("@by", by);
+                                    p.AddWithValue("@id", s.Id);
+                                }, mustAffect: true);
+
+                            foreach (var s in added)
+                                await Exec(query_insert_machine, p =>
+                                {
+                                    p.AddWithValue("@name", s.MachineName.Trim());
+                                    p.AddWithValue("@row", s.RowNo);
+                                    p.AddWithValue("@col", s.ColNo);
+                                    p.AddWithValue("@by", by);
+                                }, mustAffect: true);
+
+                            tran.Commit();
+                            return null;
+                        }
+                        catch
+                        {
+                            tran.Rollback();
+                            throw;
+                        }
                     }
+                }
+                catch (StaleLayoutException)
+                {
+                    return "Sơ đồ trên DB đã bị thay đổi ở nơi khác. Hãy bấm Hủy để tải lại rồi sửa lại.";
                 }
                 catch (SqlException ex) when (ex.Number == 2627 || ex.Number == 2601)
                 {
-                    return $"Mã máy '{newName.Trim()}' đã có trên sơ đồ.";
+                    return "Có mã máy hoặc vị trí bị trùng trên DB. Hãy bấm Hủy để tải lại rồi sửa lại.";
                 }
                 catch (SqlException ex) when (ex.Number == 207)
                 {
@@ -167,7 +234,7 @@ WHERE Id = @id;";
                 }
                 catch (Exception ex)
                 {
-                    Debug.WriteLine("Lỗi cập nhật mã máy: " + ex.Message);
+                    AppLog.Error("Lỗi lưu sơ đồ máy", ex);
                     return "Lỗi khi lưu: " + ex.Message;
                 }
             }
@@ -180,9 +247,8 @@ WHERE Id = @id;";
             {
                 try
                 {
-                    connection.Open();
-                    SqlCommand command = new SqlCommand(query_insertPO, connection);
-
+                    await connection.OpenAsync();
+                    using SqlCommand command = new SqlCommand(query_insertPO, connection);
 
                     command.Parameters.AddWithValue("@PO_Add", po);
                     command.Parameters.AddWithValue("@Num", ins);
@@ -195,7 +261,7 @@ WHERE Id = @id;";
 
                 catch (Exception ex)
                 {
-                    Debug.WriteLine("loi khi them du lieu: " + ex);
+                    AppLog.Error($"Lỗi thêm PO WIP '{po}'", ex);
                     return false;
                 }
             }
@@ -209,7 +275,7 @@ WHERE Id = @id;";
                 try
                 {
                     await connect.OpenAsync();
-                    SqlCommand cmd = new SqlCommand(query_data_table_WIP, connect);
+                    using SqlCommand cmd = new SqlCommand(query_data_table_WIP, connect);
                     cmd.Parameters.AddWithValue("PO_num", po.ToString().Trim());
                     using (SqlDataReader reader = await cmd.ExecuteReaderAsync())
                     {
@@ -237,7 +303,7 @@ WHERE Id = @id;";
                 }
                 catch (Exception ex)
                 {
-                    Debug.WriteLine("Xay ra loi trong qua trinh get data: " + ex.Message);
+                    AppLog.Error($"Lỗi lấy thông tin PO '{po}'", ex);
                     return null;
                 }
             }
@@ -249,7 +315,7 @@ WHERE Id = @id;";
                 try
                 {
                     await connect.OpenAsync();
-                    SqlCommand cmd = new SqlCommand(query_Get_ins, connect);
+                    using SqlCommand cmd = new SqlCommand(query_Get_ins, connect);
                     cmd.Parameters.AddWithValue("@machine", machine.ToString().Trim());
                     using (SqlDataReader reader = await cmd.ExecuteReaderAsync())
                     {
@@ -269,7 +335,7 @@ WHERE Id = @id;";
                 }
                 catch (Exception ex)
                 {
-                    Debug.WriteLine("Xay ra loi trong qua trinh get data: " + ex.Message);
+                    AppLog.Error($"Lỗi lấy bàn / PO đang check của máy '{machine}'", ex);
                     return null;
                 }
             }
@@ -283,7 +349,7 @@ WHERE Id = @id;";
                 try
                 {
                     connect.Open();
-                    SqlCommand cmd = new SqlCommand(query_data_table_WIP, connect);
+                    using SqlCommand cmd = new SqlCommand(query_data_table_WIP, connect);
 
                     // Nếu câu truy vấn của bạn có tham số @PO_num
                     // Trường hợp po null hoặc rỗng thì truyền DBNull.Value (để lấy tất cả nếu query hỗ trợ)
@@ -323,7 +389,7 @@ WHERE Id = @id;";
                 }
                 catch (Exception ex)
                 {
-                    Debug.WriteLine("Xay ra loi trong qua trinh get list data: " + ex.Message);
+                    AppLog.Error($"Lỗi lấy danh sách PO '{po}'", ex);
                 }
             }
 
@@ -337,9 +403,8 @@ WHERE Id = @id;";
             {
                 try
                 {
-                    connect.Open();
-                    // Không cần thêm cmd.Parameters nữa
-                    SqlCommand cmd = new SqlCommand(query_Get_ALL_table_WIP, connect);
+                    await connect.OpenAsync(); // không chặn giao diện khi chờ kết nối
+                    using SqlCommand cmd = new SqlCommand(query_Get_ALL_table_WIP, connect);
                     cmd.Parameters.AddWithValue("@machine", machine);
                     cmd.Parameters.AddWithValue("@date", dateSearch);
 
@@ -367,7 +432,7 @@ WHERE Id = @id;";
                 }
                 catch (Exception ex)
                 {
-                    Debug.WriteLine("Lỗi khi lấy danh sách PO: " + ex.Message);
+                    AppLog.Error($"Lỗi lấy danh sách PO WIP của máy '{machine}'", ex);
                 }
             }
 
@@ -400,7 +465,7 @@ WHERE Id = @id;";
                                     PONumber = valuePO,
                                     NumInspec = reader["NumInspec"]?.ToString() ?? "",
                                     Typename = reader["PSTX"]?.ToString() ?? "",
-                                    Status = await CheckPO(valuePO)?StatusCheck.Checking:StatusCheck.Normal,
+                                    Status = StatusCheck.Normal, // gán sau bằng 1 query chung
                                     SavedAt = savedDate,
                                     Roname = reader["PHTX"]?.ToString() ?? "",
                                     Index = reader["index_terminal"]?.ToString() ?? "",
@@ -409,14 +474,45 @@ WHERE Id = @id;";
                             }
                         }
                     }
+
+                    // Trạng thái "Checking": 1 query cho cả danh sách thay vì đọc cả bảng UsersTablet cho từng PO
+                    var checking = await GetCheckingPOs(connect, result.Select(r => r.PONumber));
+                    foreach (var row in result)
+                        if (checking.Contains(row.PONumber)) row.Status = StatusCheck.Checking;
+
                     return result;
                 }
                 catch (Exception ex)
                 {
-                    Debug.WriteLine("Lỗi get data WIP: " + ex.Message);
+                    AppLog.Error($"Lỗi lấy PO cùng type với '{poNum}'", ex);
                     return [];
                 }
             }
+        }
+
+        /// <summary>Các PO trong danh sách đang có trong UsersTablet.PO_Check (đang được check).</summary>
+        private static async Task<HashSet<string>> GetCheckingPOs(SqlConnection connect, IEnumerable<string> poNumbers)
+        {
+            var found = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var pos = poNumbers.Where(p => !string.IsNullOrWhiteSpace(p)).Select(p => p.Trim())
+                               .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+
+            // SQL Server giới hạn ~2100 tham số / câu → chia lô 500
+            for (int i = 0; i < pos.Count; i += 500)
+            {
+                var batch = pos.Skip(i).Take(500).ToList();
+                var names = batch.Select((_, k) => "@p" + k).ToList();
+                using var cmd = new SqlCommand(
+                    $"SELECT DISTINCT PO_Check FROM [KVH].[dbo].[UsersTablet] WHERE PO_Check IN ({string.Join(",", names)})",
+                    connect);
+                for (int k = 0; k < batch.Count; k++)
+                    cmd.Parameters.AddWithValue(names[k], batch[k]);
+
+                using var reader = await cmd.ExecuteReaderAsync();
+                while (await reader.ReadAsync())
+                    found.Add(reader["PO_Check"]?.ToString()?.Trim() ?? "");
+            }
+            return found;
         }
 
         public async Task<List<string>> Get_list_checking()
@@ -439,25 +535,29 @@ WHERE Id = @id;";
                 }
                 catch (Exception ex)
                 {
-                    Debug.WriteLine("Lỗi khi lấy danh sách PO: " + ex.Message);
+                    AppLog.Error("Lỗi lấy danh sách PO đang check", ex);
                 }
             }
 
             return listPO;
         }
 
-        //check stt PO 
+        //check stt PO
         public async Task<bool> CheckPO(string po)
         {
-            var list = await Get_list_checking();
-            foreach (var item in list)
+            using (SqlConnection connect = new SqlConnection(connectionString))
             {
-                if (item == po)
+                try
                 {
-                    return true;
+                    await connect.OpenAsync();
+                    return (await GetCheckingPOs(connect, new[] { po })).Count > 0;
+                }
+                catch (Exception ex)
+                {
+                    AppLog.Error($"Lỗi kiểm tra PO đang check '{po}'", ex);
+                    return false;
                 }
             }
-            return false;
         }
 
 
@@ -488,6 +588,7 @@ WHERE Id = @id;";
             }
             catch(Exception ex)
             {
+                AppLog.Error($"Lỗi kiểm tra MSNV '{id}'", ex);
                 return false;
             }
         }

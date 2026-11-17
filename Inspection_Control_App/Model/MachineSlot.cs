@@ -49,8 +49,12 @@ namespace Inspection_Control_App.Model
         public string? MatchInfo
         {
             get => _matchInfo;
-            set { _matchInfo = value; OnPropertyChanged(); }
+            set { _matchInfo = value; OnPropertyChanged(); OnPropertyChanged(nameof(ToolTipText)); }
         }
+
+        /// <summary>Tooltip: tên máy đầy đủ (+ danh sách PO trùng type nếu có).</summary>
+        public string ToolTipText =>
+            string.IsNullOrEmpty(MatchInfo) ? MachineName : MachineName + Environment.NewLine + MatchInfo;
 
         public string SubText
         {
@@ -62,6 +66,15 @@ namespace Inspection_Control_App.Model
                 return string.Join(" · ", parts);
             }
         }
+
+        public MachineSlot Clone() => new()
+        {
+            Id = Id,
+            MachineName = MachineName,
+            RowNo = RowNo,
+            ColNo = ColNo,
+            IndexTerminal = IndexTerminal,
+        };
 
         /// <summary>
         /// Sơ đồ mặc định, dùng khi chưa tạo bảng MachineLayout trên DB
